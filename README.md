@@ -43,3 +43,7 @@ hdu = fits.PrimaryHDU(img.data,header=header)
 hdul = fits.HDUList([hdu])
 hdul.writeto("test.fits")
 ```
+
+
+## Centroid Finding
+create plot that has X/Y collapsed profiles and imshow with dot 
