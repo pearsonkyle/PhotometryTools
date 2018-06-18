@@ -20,12 +20,12 @@ Tools for performing aperture and PSF photometry for real time data analysis
 ```python 
 img = ccd([1024,1024]) # define a grid size or pass it a 2D np array
 star = psf( np.random.normal(492,5), # x - centroid
-                     np.random.normal(751,5), # y - centroid
-                     np.random.normal(2000,100), # flux 
-                     np.random.normal(4,0.2), # x - standard deviation
-                     np.random.normal(4,0.2), # y - standard deviation
-                     0, # background level 
-                     0) # rotation of PSF 
+             np.random.normal(751,5), # y - centroid
+             np.random.normal(2000,100), # flux 
+             np.random.normal(4,0.2), # x - standard deviation
+             np.random.normal(4,0.2), # y - standard deviation
+             0, # background level 
+             0 ) # rotation of PSF 
 img.draw(star)
 ```
 The above code should give you something like this: 
