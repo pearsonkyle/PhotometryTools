@@ -44,6 +44,18 @@ hdul = fits.HDUList([hdu])
 hdul.writeto("test.fits")
 ```
 
+## Using the code
 
-## Centroid Finding
-create plot that has X/Y collapsed profiles and imshow with dot 
+```python
+if __name__ == "__main__":
+
+    img = ccd([1024,1024])
+    star = psf(256,512,2000,4,4,0,0)
+    img.draw(star)
+
+    pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
+    area = phot(pars_psf[0],pars_psf[1],img.data,r=15,debug=False,bgsub=True)
+    print('best fit parameters:',pars_psf)
+    print('phot area=',area)
+    print('psf area=',star.gaussian_area)
+```
