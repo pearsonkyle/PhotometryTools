@@ -6,7 +6,6 @@ Tools for performing aperture and PSF photometry for real time data analysis
 - Aperature Photometry (Fractional pixel values handled by interpolating onto higher resolution grid) 
 - PSF Photometry (just use best fit Gaussian parameters from centroid algorithm)
 - Sky Background Subtraction (can handle fractional pixels within an annulus)
-- Data plotter (excellent for analyzing data in real time while taking observations)
 - Data Generator 
 
 ### Requirements
