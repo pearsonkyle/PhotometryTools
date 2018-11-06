@@ -14,6 +14,28 @@ Tools for performing aperture and PSF photometry for real time data analysis
 - Matplotlib
 - Scipy
 
+
+## Example Code
+
+```python
+from PhotometryTools import ccd, psf, fit_centroid, phot
+
+if __name__ == "__main__":
+
+    # generate some test data
+    img = ccd([1024,1024])
+    star = psf(256,512,2000,4,4,0,0)
+    img.draw(star)
+
+    # find the centroid and then sum up values in an aperture
+    pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
+    area = phot(pars_psf[0],pars_psf[1],img.data,r=15,debug=False,bgsub=True)
+    print('best fit parameters:',pars_psf)
+    print('phot area=',area)
+    print('psf area=',star.gaussian_area)
+```
+
+
 ### Data Generator
 ```python 
 img = ccd([1024,1024]) # define a grid size or pass it a 2D np array
@@ -42,22 +64,3 @@ hdul = fits.HDUList([hdu])
 hdul.writeto("test.fits")
 ```
 
-## Example Code
-
-```python
-from PhotometryTools import ccd, psf, fit_centroid, phot
-
-if __name__ == "__main__":
-
-    # generate some test data
-    img = ccd([1024,1024])
-    star = psf(256,512,2000,4,4,0,0)
-    img.draw(star)
-
-    # find the centroid and then sum up values in an aperture
-    pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
-    area = phot(pars_psf[0],pars_psf[1],img.data,r=15,debug=False,bgsub=True)
-    print('best fit parameters:',pars_psf)
-    print('phot area=',area)
-    print('psf area=',star.gaussian_area)
-```
