@@ -28,6 +28,7 @@ if __name__ == "__main__":
     img.draw(star)
 
     # find the centroid and then sum up values in an aperture
+    # of 15 pixels around centroid position
     pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
     area = phot(pars_psf[0],pars_psf[1],img.data,r=15,debug=False,bgsub=True)
     print('best fit parameters:',pars_psf)
