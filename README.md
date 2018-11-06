@@ -14,7 +14,6 @@ Tools for performing aperture and PSF photometry for real time data analysis
 - Numpy
 - Matplotlib
 - Scipy
-- Astropy
 
 ### Data Generator
 ```python 
@@ -28,9 +27,9 @@ star = psf( np.random.normal(492,5), # x - centroid
              0 ) # rotation of PSF 
 img.draw(star)
 ```
+
 The above code should give you something like this: 
 ![alt text](https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png "Logo Title Text 1")
-
 
 If you want to make a fits file use the data generated above and add: 
 ```python 
@@ -49,10 +48,12 @@ hdul.writeto("test.fits")
 ```python
 if __name__ == "__main__":
 
+    # generate some test data
     img = ccd([1024,1024])
     star = psf(256,512,2000,4,4,0,0)
     img.draw(star)
 
+    # find the centroid and then sum up values in an aperture
     pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
     area = phot(pars_psf[0],pars_psf[1],img.data,r=15,debug=False,bgsub=True)
     print('best fit parameters:',pars_psf)
