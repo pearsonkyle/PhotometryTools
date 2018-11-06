@@ -43,9 +43,11 @@ hdul = fits.HDUList([hdu])
 hdul.writeto("test.fits")
 ```
 
-## Using the code
+## Example Code
 
 ```python
+from PhotometryTools import ccd, psf, fit_centroid, phot
+
 if __name__ == "__main__":
 
     # generate some test data
