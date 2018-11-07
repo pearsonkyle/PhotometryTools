@@ -117,12 +117,13 @@ def fit_centroid(data,pos,init=None,psf_output=False,lossfn='linear',box=25):
     # TODO make these inputs to function?
     lo = [pos[0]-box,pos[1]-box,0,1,1,0]
     up = [pos[0]+box,pos[1]+box,64000,40,40,np.max(data[yv,xv])]
-    res = least_squares(fcn2min,x0=[*pos,*init],bounds=[lo,up],loss=lossfn,jac='3-point')
+
+    # fit centroid
+    res = least_squares(fcn2min,x0=pos+init,bounds=[lo,up],loss=lossfn,jac='3-point')
     #res = minimize(fcn2min,x0=[*pos,*init],method='Nelder-Mead')
-    del init
 
     if psf_output:
-        return psf(*res.x,0)
+        return psf(*res.x,rot=0)
     else:
         return res.x
 
@@ -222,7 +223,7 @@ def skybg_phot(x0,y0,data,r=25,dr=5,samp=3,debug=False):
 if __name__ == "__main__":
 
     img = ccd([1024,1024])
-    star = psf(256,512,2000,4,4,0,0)
+    star = psf(256.2,512.5,2000,4,4,0,0)
     img.draw(star)
 
     pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
@@ -230,3 +231,20 @@ if __name__ == "__main__":
     print('best fit parameters:',pars_psf)
     print('phot area=',area)
     print('psf area=',star.gaussian_area)
+
+    '''
+    for j in range(8,16,2):
+        mask = []; real=[]
+
+        for i in range(1,50):
+            ma,ra = phot_test(pars_psf[0],pars_psf[1],img.data,r=j,samp=i,debug=False,bgsub=True)
+            mask.append( ma)
+            real.append( ra)
+
+        plt.plot(range(1,50),100*(np.array(mask)/np.array(real)-1),ls='-',label='radius: {}'.format(j) )
+
+    plt.legend(loc='best')
+    plt.ylabel('Deviation from true area (%)')
+    plt.xlabel('Up Sampling Rate (times)')
+    plt.show()
+    '''
