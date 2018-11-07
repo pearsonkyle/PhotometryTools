@@ -15,8 +15,7 @@ Tools for performing aperture and PSF photometry for real time data analysis
 - Scipy
 
 
-## Example Code
-
+### Example Code
 ```python
 from PhotometryTools import ccd, psf, fit_centroid, phot
 
@@ -27,9 +26,10 @@ if __name__ == "__main__":
     star = psf(256,512,2000,4,4,0,0)
     img.draw(star)
 
-    # find the centroid and then sum up values in an aperture
-    # of 15 pixels around centroid position
+    # fit 2D Gaussian to a location near [250,506] as initial guess
     pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
+    
+    # Sum up data using a circular aperture of 15 pixels around the centroid
     area = phot(pars_psf[0],pars_psf[1],img.data,r=15,debug=False,bgsub=True)
     print('best fit parameters:',pars_psf)
     print('phot area=',area)
