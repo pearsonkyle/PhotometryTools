@@ -9,7 +9,7 @@ Tools for performing aperture and PSF photometry for real time data analysis
 - Data Generator 
 
 ### Requirements
-- Python 3
+- Python 3.6+
 - Numpy
 - Matplotlib
 - Scipy
