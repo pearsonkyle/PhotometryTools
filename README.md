@@ -50,9 +50,6 @@ star = psf( np.random.normal(492,5), # x - centroid
 img.draw(star)
 ```
 
-The above code should give you something like this: 
-![alt text](https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png "Logo Title Text 1")
-
 If you want to make a fits file use the data generated above and add: 
 ```python 
 from astropy.io import fits 
