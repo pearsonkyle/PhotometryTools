@@ -138,10 +138,10 @@ def sky_annulus(x0,y0,r=25,dr=5,samp=10):
     mask = (rv>r) & (rv<(r+dr)) # sky annulus mask
     return xv,yv,mask
 
-def phot(x0,y0,data,r=25,dr=5,samp=3,debug=False,bgsub=False):
+def phot(x0,y0,data,r=25,dr=5,samp=3,debug=False,bgsub=True):
 
     # determine img indexes for aperture region
-    xv,yv = mesh_box([x0,y0],r+2)
+    xv,yv = mesh_box([x0,y0], int(np.round(r)) )
 
     # derive indexs on a higher resolution grid and create aperture mask
     px,py,mask = circle_mask(x0,y0,r=r,samp=xv.shape[0]*samp)
@@ -189,7 +189,7 @@ def phot(x0,y0,data,r=25,dr=5,samp=3,debug=False,bgsub=False):
 def skybg_phot(x0,y0,data,r=25,dr=5,samp=3,debug=False):
 
     # determine img indexes for aperture region
-    xv,yv = mesh_box([x0,y0],(r+dr)+2)
+    xv,yv = mesh_box([x0,y0], int(np.round(r+dr)) )
 
     # derive indexs on a higher resolution grid and create aperture mask
     px,py,mask = sky_annulus(x0,y0,r=r,samp=xv.shape[0]*samp)
@@ -226,7 +226,7 @@ if __name__ == "__main__":
     img.draw(star)
 
     pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
-    area = phot(pars_psf[0],pars_psf[1],img.data,r=15,debug=False,bgsub=True)
+    area = phot(pars_psf[0],pars_psf[1],img.data,r=12.5,debug=True,bgsub=True)
     print('best fit parameters:',pars_psf)
     print('phot area=',area)
     print('psf area=',star.gaussian_area)
