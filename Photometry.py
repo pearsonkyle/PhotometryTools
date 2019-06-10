@@ -205,6 +205,10 @@ def skybg_phot(x0,y0,data,r=25,dr=5,samp=3,debug=False):
     pz[~mask] = 0
     pz[pz<0] = 0
 
+    # mask out brighter pixels in annulus
+    quarterMask = pz < np.percentile(pz[mask],50) #,25)
+    pz[~quarterMask] = 0
+
     # scale area back to original grid, total flux in sky annulus
     parea = pz.sum() * np.diff(px).mean()*np.diff(py[:,0]).mean()
 
@@ -216,13 +220,17 @@ def skybg_phot(x0,y0,data,r=25,dr=5,samp=3,debug=False):
         import pdb; pdb.set_trace()
 
     # return bg value per pixel
-    return pz.sum()/mask.sum()
+    bgmask = mask&quarterMask
+    return pz.sum()/bgmask.sum()
 
 
 if __name__ == "__main__":
 
     img = ccd([1024,1024])
     star = psf(256.2,512.5,2000,4,4,0,0)
+    img.draw(star)
+
+    star = psf(276.2,502.5,2000,4,4,0,0)
     img.draw(star)
 
     pars_psf = fit_centroid(img.data,[250,506],box=25,psf_output=False)
