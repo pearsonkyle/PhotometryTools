@@ -53,7 +53,7 @@ def mesh_box(pos,box):
     xv, yv = np.meshgrid(x, y)
     return xv.astype(int),yv.astype(int)
     
-def fit_centroid(data,pos,init,lo,up,psf_function=gaussian_psf,lossfn='linear',box=15):
+def fit_psf(data,pos,init,lo,up,psf_function=gaussian_psf,lossfn='linear',box=15):
     xv,yv = mesh_box(pos, box)
     def fcn2min(pars):
         model = psf_function(xv,yv,*pars)
@@ -113,9 +113,10 @@ if __name__ == "__main__":
     sx = estimate_sigma(x)
     sy = estimate_sigma(y)
 
-    pars = fit_centroid(
+    # fit PSF 
+    pars = fit_psf(
         img.data,
-        [wx, wy],
+        [wx, wy], 
         [np.max(img.data[yv,xv]), sx, sy, 0, np.min(img.data[yv,xv]) ], # initial guess: [amp, sigx, sigy, rotation, bg]
         [wx-5, wy-5, 0,   0, 0, -np.pi/4, 0],                           # lower bound: [xc, yc, amp, sigx, sigy, rotation,  bg]
         [wx+5, wy+5, 1e5, 2, 2,  np.pi/4, np.percentile(img.data,25)],  # upper bound: 
@@ -129,13 +130,13 @@ if __name__ == "__main__":
     print('psf area=',2*np.pi*pars[2]*pars[3]*pars[4])
 
     # compute PSF fit residual
-    xv,yv = mesh_box([15,15], 10) # pull out subregion that was fit 
+    xv,yv = mesh_box([15,15], 5) # pull out subregion that was fit 
     model = psf( pars, gaussian_psf).eval(xv,yv)
     residual = img.data[yv,xv] - model 
 
     # diagnostic plots
-    f,ax = plt.subplots(3)
-    ax[0].imshow(img.data); ax[0].set_title('Raw Data')
+    f,ax = plt.subplots(1,3)
+    ax[0].imshow(img.data[yv,xv]); ax[0].set_title('Raw Data')
     ax[1].imshow(model); ax[1].set_title('PSF model')
     ax[2].imshow(residual); ax[2].set_title('Residual')
     plt.show()
