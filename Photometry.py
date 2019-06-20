@@ -1,47 +1,35 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.ndimage.interpolation import rotate
-from scipy.optimize import least_squares,minimize
-from scipy.interpolate import RectBivariateSpline
-from photutils import aperture_photometry
-from photutils import CircularAperture
+from scipy.optimize import least_squares
+from photutils import aperture_photometry, CircularAperture, CircularAnnulus
 
+def mixed_psf(x,y,x0,y0,a,sigx,sigy,rot,b, w):
+    gaus = gaussian_psf(x,y,x0,y0,a,sigx,sigy,rot, 0)
+    lore = lorentz_psf(x,y,x0,y0,a,sigx,sigy,rot, 0)
+    return (1-w)*gaus + w*lore + b
 
-def star_psf(x,y,x0,y0,a,sigx,sigy,b):
-    gaus = a * np.exp(-(x-x0)**2 / (2*sigx**2) ) * np.exp(-(y-y0)**2 / (2*sigy**2) ) + b
-    return gaus
+def gaussian_psf(x,y,x0,y0,a,sigx,sigy,rot, b):
+    rx = (x-x0)*np.cos(rot) - (y-y0)*np.sin(rot)
+    ry = (x-x0)*np.sin(rot) + (y-y0)*np.cos(rot)
+    gausx = np.exp(-(rx)**2 / (2*sigx**2) )
+    gausy = np.exp(-(ry)**2 / (2*sigy**2) )
+    return a*gausx*gausy + b
+
+def lorentz_psf(x,y,x0,y0,a,sigx,sigy,rot, b):
+    rx = (x-x0)*np.cos(rot) - (y-y0)*np.sin(rot)
+    ry = (x-x0)*np.sin(rot) + (y-y0)*np.cos(rot)
+    lorex = sigx**2 / ( rx**2 + sigx**2 )
+    lorey = sigy**2 / ( ry**2 + sigy**2 )
+    return a*lorex*lorey + b
 
 class psf(object):
-    def __init__(self,x0,y0,a,sigx,sigy,b,rot=0):
-        self.pars = [x0,y0,a,sigx,sigy,b]
-        self.a = a
-        self.x0 = x0
-        self.y0 = y0
-        self.sigx = sigx
-        self.sigy = sigy
-        self.b = b
-        self.rot = rot
+    def __init__(self,pars,psf_function):
+        self.pars = pars # x0,y0,a,sigx,sigy,rot
+        self.fn = psf_function
 
     def eval(self,x,y):
-        if self.rot == 0:
-            return star_psf(x,y,*self.pars)
-        else:
-            return rotate(star_psf(x,y,*self.pars),self.rot,reshape=False)
-
-    @property
-    def gaussian_area(self):
-        # PSF area without background
-        return 2*np.pi*self.a*self.sigx*self.sigy
-
-    @property
-    def cylinder_area(self):
-        # models background 
-        return np.pi*(3*self.sigx * 3*self.sigy) * self.b
+        return self.fn(x,y,*self.pars)
         
-    @property
-    def area(self):
-        return self.gaussian_area + self.cylinder_area
-
 class ccd(object):
     def __init__(self,size):
 
@@ -51,26 +39,53 @@ class ccd(object):
             self.data = np.zeros(size)
 
     def draw(self,star):
-        b=max(star.sigx,star.sigy)*5
-        x = np.arange( int(star.x0-b), int(star.x0+b+1) )
-        y = np.arange( int(star.y0-b), int(star.y0+b+1) )
+        b=max(star.pars[3],star.pars[4])*5
+        x = np.arange( int(star.pars[0]-b-1), int(star.pars[0]+b+1) ) 
+        y = np.arange( int(star.pars[1]-b-1), int(star.pars[1]+b+1) )
+        # TODO constrain evaluation bounds to within image?
         xv, yv = np.meshgrid(x, y)
         self.data[yv,xv] += star.eval(xv,yv)
 
-def mesh_box(pos,box,mesh=True,npts=-1):
+def mesh_box(pos,box):
     pos = [int(np.round(pos[0])),int(np.round(pos[1]))]
-    if npts == -1:
-        x = np.arange(pos[0]-box, pos[0]+box+1)
-        y = np.arange(pos[1]-box, pos[1]+box+1)
-    else:
-        x = np.linspace(pos[0]-box, pos[0]+box+1,npts)
-        y = np.linspace(pos[1]-box, pos[1]+box+1,npts)
+    x = np.arange(pos[0]-box, pos[0]+box+1)
+    y = np.arange(pos[1]-box, pos[1]+box+1)
+    xv, yv = np.meshgrid(x, y)
+    return xv.astype(int),yv.astype(int)
+    
+def fit_centroid(data,pos,init,lo,up,psf_function=gaussian_psf,lossfn='linear',box=15):
+    xv,yv = mesh_box(pos, box)
+    def fcn2min(pars):
+        model = psf_function(xv,yv,*pars)
+        return (data[yv,xv]-model).flatten()
+    res = least_squares(fcn2min,x0=[*pos,*init],bounds=[lo,up],loss=lossfn,jac='3-point')
+    return res.x
 
-    if mesh:
-        xv, yv = np.meshgrid(x, y)
-        return xv,yv
+def phot(data,xc,yc,r=25,dr=5):
+    if dr>0:
+        bgflux = skybg_phot(data,xc,yc,r,dr)
     else:
-        return x,y
+        bgflux = 0
+    positions = [(xc, yc)]
+    apertures = CircularAperture(positions, r=r)
+    phot_table = aperture_photometry(data-bgflux, apertures, method='exact')
+    return float(phot_table['aperture_sum']) 
+    
+def skybg_phot(data,xc,yc,r=25,dr=5):    
+    # create a crude annulus to mask out bright background pixels 
+    xv,yv = mesh_box([xc,yc], np.round(r+dr) )
+    rv = ((xv-xc)**2 + (yv-yc)**2)**0.5
+    mask = (rv>r) & (rv<(r+dr))
+    cutoff = np.percentile(data[yv,xv][mask], 50)
+    dat = np.copy(data)
+    dat[dat>cutoff] = cutoff # ignore bright pixels like stars 
+
+    # under estimate background 
+    positions = [(xc, yc)]
+    apertures = CircularAnnulus(positions, r_in=r, r_out=r+dr)
+    phot_table = aperture_photometry(dat, apertures, method='exact')
+    aper_area = apertures.area()
+    return float(phot_table['aperture_sum'])/aper_area
 
 def estimate_sigma(x,maxidx=-1):
     if maxidx == -1:
@@ -80,183 +95,55 @@ def estimate_sigma(x,maxidx=-1):
     FWHM = upper-lower
     return FWHM/(2*np.sqrt(2*np.log(2)))
 
-def fit_centroid(data,pos,init=None,psf_output=False,lossfn='linear',box=25):
-    if not init: # if init is none, then set the values
-        init=[-1,5,5,0]
-
-    # estimate the amplitude and centroid
-    if init[0]==-1:
-        # subarray of data around star
-        xv,yv = mesh_box(pos,box)
-
-        # amplitude guess
-        init[0] = np.max( data[yv,xv] )
-
-        # weighted sum to estimate center
-        wx = np.sum(np.unique(xv)*data[yv,xv].sum(0))/np.sum(data[yv,xv].sum(0))
-        wy = np.sum(np.unique(yv)*data[yv,xv].sum(1))/np.sum(data[yv,xv].sum(1))
-        pos = [wx, wy]
-        # estimate std by calculation of FWHM
-        x,y= data[yv,xv].sum(0),data[yv,xv].sum(1)
-        init[1] = estimate_sigma(x)
-        init[2] = estimate_sigma(y)
-
-        # bg estimate
-        # compute the average from 1/4 of the lowest values in the bg
-        init[3] = np.mean( np.sort( data[yv,xv].flatten() )[:int(data[yv,xv].flatten().shape[0]*0.25)] )
-    #print('init pos:',pos)
-    #print('init2:',init)
-
-    # recenter data on weighted average of light
-    xv,yv = mesh_box( pos ,box)
-
-    # pars = x,y, a,sigx,sigy, rotate
-    def fcn2min(pars):
-        model = star_psf(xv,yv,*pars)
-        return (data[yv,xv]-model).flatten() # method for LS
-        #return np.sum( (data[yv,xv]-model)**2 ) # method for minimize
-
-    # TODO make these inputs to function?
-    lo = [pos[0]-box,pos[1]-box,0,0,0,0]
-    up = [pos[0]+box,pos[1]+box,64000,4,4,np.max(data[yv,xv])]
-    res = least_squares(fcn2min,x0=[*pos,*init],bounds=[lo,up],loss=lossfn,)
-    #res = minimize(fcn2min,x0=[*pos,*init],method='Nelder-Mead')
-    del init
-
-    if psf_output:
-        return psf(*res.x,0)
-    else:
-        return res.x
-
-def circle_mask(x0,y0,r=25,samp=10):
-    xv,yv = mesh_box([x0,y0],r+1,npts=samp)
-    rv = ((xv-x0)**2 + (yv-y0)**2)**0.5
-    mask = rv<r
-    return xv,yv,mask
-
-def sky_annulus(x0,y0,r=25,dr=5,samp=10):
-    xv,yv = mesh_box([x0,y0],r+dr+1,npts=samp)
-    rv = ((xv-x0)**2 + (yv-y0)**2)**0.5
-    mask = (rv>r) & (rv<(r+dr)) # sky annulus mask
-    return xv,yv,mask
-
-
-def phot(x0,y0,data,r=25,dr=5,samp=5,debug=False,bgsub=True):
-
-    if bgsub:
-        # get the bg flux per pixel
-        bgflux = skybg_phot(x0,y0,data,r,dr,samp)
-    else:
-        bgflux = 0
-
-    positions = [(x0, y0)]
-    apertures = CircularAperture(positions, r=r)
-    phot_table = aperture_photometry(data-bgflux, apertures)
-    return phot_table[0][3]
-    
-    # the code below is depreciated because interpolation errors 
-    # ensue when using splines 
-
-    # determine img indexes for aperture region
-    xv,yv = mesh_box([x0,y0], int(np.round(r)) )
-    subdata = data[yv,xv]
-    
-    # derive indexs on a higher resolution grid and create aperture mask
-    px,py,mask = circle_mask(x0,y0,r=r,samp=xv.shape[0]*samp)
-
-    model = RectBivariateSpline(np.unique(xv),np.unique(yv),subdata,kx=1,ky=1)
-    pz = model.ev(px,py)
-
-    # evaluate data on highres grid
-    #model = interp2d(np.unique(xv),np.unique(yv),subdata)
-    #pz = model( np.unique(px), np.unique(py) )
-
-    # model = RegularGridInterpolator( (np.unique(xv),np.unique(yv)), subdata,method='linear', bounds_error=False)
-    # data = model(np.array([px.flatten(),py.flatten()]).T).reshape(px.shape)
-
-    # zero out pixels larger than radius
-    pz[~mask] = 0
-
-    # subtract off the background
-
-    # sum over circular aperture and subtract bg flux from each pixel
-    pz -= bgflux
-
-    # remove negative pixel values
-    pz[pz<0] = 0
-
-    # scale area back to original grid
-    parea = pz.sum()*np.diff(px).mean()*np.diff(py[:,0]).mean()
-
-    if debug:
-        print('   mask area=',mask.sum()*np.diff(px).mean()*np.diff(py[:,0]).mean()  )
-        print('cirular area=',np.pi*r**2)
-        print('square aper =',subdata.sum()) # square aperture sum
-        print('   phot flux=',parea)
-        print('bg flux/pix =',bgflux)
-        totalbg = bgflux*np.diff(px).mean()*np.diff(py[:,0]).mean()*mask.sum()
-        print('     bg flux=',totalbg )
-        import pdb; pdb.set_trace()
-
-    if parea / subdata.sum() > 1.1:
-        print('aper phot messed')
-        import pdb; pdb.set_trace()
-
-    return parea, subdata.sum()
-
-def skybg_phot(x0,y0,data,r=25,dr=5,samp=10,debug=False):
-
-    # determine img indexes for aperture region
-    xv,yv = mesh_box([x0,y0], int(np.round(r+dr)) )
-
-    # derive indexs on a higher resolution grid and create aperture mask
-    px,py,mask = sky_annulus(x0,y0,r=r,samp=xv.shape[0]*samp)
-
-    # interpolate original data onto higher resolution grid
-    subdata = data[yv,xv]
-    model = RectBivariateSpline(np.unique(xv),np.unique(yv),subdata,kx=1,ky=1)
-    pz = model.ev(px,py)
-
-    # evaluate data on highres grid
-    #model = interp2d(np.unique(xv),np.unique(yv),subdata)
-    #pz = model( np.unique(px), np.unique(py) )
-
-
-    # zero out pixels larger than radius
-    pz[~mask] = 0
-    pz[pz<0] = 0
-
-    # mask out brighter pixels in annulus
-    quarterMask = pz < np.percentile(pz[mask],50) #,25)
-    pz[~quarterMask] = 0
-
-    # scale area back to original grid, total flux in sky annulus
-    parea = pz.sum() * np.diff(px).mean()*np.diff(py[:,0]).mean()
-
-    if debug:
-        print('mask area=',mask.sum()*np.diff(px).mean()*np.diff(py[:,0]).mean()  )
-        print('true area=',2*np.pi*r*dr)
-        print('subdata flux=',subdata.sum())
-        print('bg phot flux=',parea)
-        import pdb; pdb.set_trace()
-
-    # return bg value per pixel
-    bgmask = mask&quarterMask
-    return pz.sum()/bgmask.sum()
-
-
 if __name__ == "__main__":
 
-    # simulate spitzer systematics 
-    # img = ccd([32,32])
-    # star = psf(15.1,15.0,1000,0.75,0.75,0,0)
-    # img.data += np.random.random( img.data.shape)
-    # img.draw(star)
-    # pars_psf = fit_centroid(img.data,[15,15],box=10,psf_output=False)
-    # area = phot(pars_psf[0],pars_psf[1],img.data,r=2.5,debug=False,bgsub=True)
-    # print('best fit parameters:',pars_psf)
-    # print('phot area=',area)
-    # print('psf area=',star.gaussian_area)
+    # simulate an image
+    img = ccd([32,32])
+    star = psf( [15.1,15.0, 1000,0.75,0.85, np.pi/6, 0], gaussian_psf)
+    img.data += np.random.random( img.data.shape)
+    img.draw(star)
+
+    # compute flux weighted centroid on subarray
+    xv,yv = mesh_box([15,15],5)
+    wx = np.sum(np.unique(xv)*img.data[yv,xv].sum(0))/np.sum(img.data[yv,xv].sum(0))
+    wy = np.sum(np.unique(yv)*img.data[yv,xv].sum(1))/np.sum(img.data[yv,xv].sum(1))
+
+    # estimate standard deviation 
+    x,y= img.data[yv,xv].sum(0),img.data[yv,xv].sum(1) 
+    sx = estimate_sigma(x)
+    sy = estimate_sigma(y)
+
+    pars = fit_centroid(
+        img.data,
+        [wx, wy],
+        [np.max(img.data[yv,xv]), sx, sy, 0, np.min(img.data[yv,xv]) ], # initial guess: [amp, sigx, sigy, rotation, bg]
+        [wx-5, wy-5, 0,   0, 0, -np.pi/4, 0],                           # lower bound: [xc, yc, amp, sigx, sigy, rotation,  bg]
+        [wx+5, wy+5, 1e5, 2, 2,  np.pi/4, np.percentile(img.data,25)],  # upper bound: 
+        psf_function=gaussian_psf,
+        box=5 # only fit a subregion +/- 5 px from centroid
+    )
+
+    area = phot(img.data, pars[0],pars[1],r=2.5,dr=8)
+    print('best fit parameters:',pars)
+    print('phot area=',area)
+    print('psf area=',2*np.pi*pars[2]*pars[3]*pars[4])
+
+    # compute PSF fit residual
+    xv,yv = mesh_box([15,15], 10) # pull out subregion that was fit 
+    model = psf( pars, gaussian_psf).eval(xv,yv)
+    residual = img.data[yv,xv] - model 
+
+    # diagnostic plots
+    f,ax = plt.subplots(3)
+    ax[0].imshow(img.data); ax[0].set_title('Raw Data')
+    ax[1].imshow(model); ax[1].set_title('PSF model')
+    ax[2].imshow(residual); ax[2].set_title('Residual')
+    plt.show()
+
+
+
+
+    dude()
 
     # simulate some wierd pixel sensitivity 
     xv,yv = mesh_box([15,15], 15 )
@@ -272,10 +159,10 @@ if __name__ == "__main__":
     NPTS = 10000
     xcent = [15]
     ycent = [15]
-    sigma = [0.75]
+    sigma = [0.55]
     for i in range(1,NPTS):
-        xcent.append( xcent[i-1] + np.random.normal(0,0.01) )
-        ycent.append( ycent[i-1] + np.random.normal(0,0.01) )
+        xcent.append( xcent[i-1] + np.random.normal(0,0.005) )
+        ycent.append( ycent[i-1] + np.random.normal(0,0.005) )
         sigma.append( sigma[i-1] + np.random.normal(0,0.001) )
         #sigma.append( 0.75)
 
@@ -315,7 +202,7 @@ if __name__ == "__main__":
         images.append( img.data)
 
         # the truth flux value
-        trueflux.append( star.gaussian_area*data[i])
+        trueflux.append( star.gaussian_area )
 
         # aperture photometry
         apflux = phot(xcent[i],ycent[i],img.data,r=5,debug=False,bgsub=True)
@@ -325,21 +212,25 @@ if __name__ == "__main__":
         psff = fit_centroid(img.data,[xcent[i],ycent[i]], box=10, psf_output=True)
         psfflux.append( psff.gaussian_area )
 
-    
+
+    # test decorrelation methods 
+    from find_nbr import find_nbr_qhull
+    gw, nearest = find_nbr_qhull(xcent, ycent, 0)
+    flux = np.array(photflux)/np.mean(photflux)
+    wf = np.array([np.sum(flux[nearest[i]] * gw[i]) for i in range(len(flux))])
+
+
     f,ax = plt.subplots(3)
     ax[0].plot(t,xcent,'r-',label='X')
     ax[0].plot(t,ycent,'g-',label='Y')
-    ax[0].set_xlabel('Image Number')
     ax[0].set_ylabel('Centroid Position [px]')
     ax[0].legend(loc='best')
     ax[1].plot(t,sigma,'m-')
-    ax[1].set_xlabel('Image Number')
     ax[1].set_ylabel('PSF sigma [px]')
-    
-    ax[2].plot(t,np.array(trueflux)/np.mean(trueflux),'k.',label='Truth',alpha=0.5)
     ax[2].plot(t,np.array(photflux)/np.mean(photflux),'g.',label='Aperture Phot',alpha=0.5)
-    #ax[2].plot(t,sqrflux,'m.',label='Square Phot',alpha=0.5)
+    ax[2].plot(t,np.array(photflux)/np.mean(photflux)/wf,'r.',label='Aperture Phot + GW Decorrelation',alpha=0.5)
     ax[2].plot(t,np.array(psfflux )/np.mean(psfflux),'c.',label='PSF Phot',alpha=0.5)
+    ax[2].plot(t,np.array(trueflux)/np.mean(trueflux),'k.',label='Truth',alpha=0.5)
+    ax[2].set_xlabel('Time')
     ax[2].legend(loc='best')
-
     plt.show()
