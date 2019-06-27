@@ -62,15 +62,31 @@ def fit_psf(data,pos,init,lo,up,psf_function=gaussian_psf,lossfn='linear',box=15
     return res.x
 
 def phot(data,xc,yc,r=25,dr=5):
+
     if dr>0:
         bgflux = skybg_phot(data,xc,yc,r,dr)
     else:
         bgflux = 0
     positions = [(xc, yc)]
-    apertures = CircularAperture(positions, r=r)
-    phot_table = aperture_photometry(data-bgflux, apertures, method='exact')
-    return float(phot_table['aperture_sum']) 
-    
+    data = data-bgflux
+    data[data<0] = 0 
+
+    try:
+        apertures = CircularAperture(positions, r=r)
+        phot_table = aperture_photometry(data, apertures, method='exact')
+        return float(phot_table['aperture_sum']) 
+    except:
+        # create high res mask (TODO make more efficient, precompute mask + pass in)
+        xvh,yvh = mesh_box([xc,yc], (np.round(r)+1)*10 )
+        rvh = ((xvh-xc)**2 + (yvh-yc)**2)**0.5
+        maskh = (rvh<r*10)
+
+        # downsize to native resolution 
+        xv,yv = mesh_box([xc,yc], (np.round(r)+1) )
+        mask = imresize(maskh, xv.shape) # rough approx for fractional pixels
+        mask = mask / mask.max()
+        return np.sum(data[yv,xv] * mask)
+
 def skybg_phot(data,xc,yc,r=25,dr=5):    
     # create a crude annulus to mask out bright background pixels 
     xv,yv = mesh_box([xc,yc], np.round(r+dr) )
@@ -80,12 +96,15 @@ def skybg_phot(data,xc,yc,r=25,dr=5):
     dat = np.copy(data)
     dat[dat>cutoff] = cutoff # ignore bright pixels like stars 
 
-    # under estimate background 
-    positions = [(xc, yc)]
-    apertures = CircularAnnulus(positions, r_in=r, r_out=r+dr)
-    phot_table = aperture_photometry(dat, apertures, method='exact')
-    aper_area = apertures.area()
-    return float(phot_table['aperture_sum'])/aper_area
+    try:
+        # under estimate background 
+        positions = [(xc, yc)]
+        apertures = CircularAnnulus(positions, r_in=r, r_out=r+dr)
+        phot_table = aperture_photometry(dat, apertures, method='exact')
+        aper_area = apertures.area()
+        return float(phot_table['aperture_sum'])/aper_area
+    except:
+        return min( np.mean(data[yv,xv][mask]), np.median(data[yv,xv][mask]) )
 
 def estimate_sigma(x,maxidx=-1):
     if maxidx == -1:
@@ -95,13 +114,17 @@ def estimate_sigma(x,maxidx=-1):
     FWHM = upper-lower
     return FWHM/(2*np.sqrt(2*np.log(2)))
 
+
+
 if __name__ == "__main__":
 
     # simulate an image
     img = ccd([32,32])
-    star = psf( [15.1,15.0, 1000,0.75,0.85, np.pi/6, 0], gaussian_psf)
-    img.data += np.random.random( img.data.shape)
+    star = psf( [15.1,15.0, 1000, 1.5, 1, np.pi/6, 0], gaussian_psf)
+    img.data += 10*np.random.random( img.data.shape)
     img.draw(star)
+    plt.imshow(img.data)
+    plt.show()
 
     # compute flux weighted centroid on subarray
     xv,yv = mesh_box([15,15],5)
@@ -128,6 +151,7 @@ if __name__ == "__main__":
     print('best fit parameters:',pars)
     print('phot area=',area)
     print('psf area=',2*np.pi*pars[2]*pars[3]*pars[4])
+    print('true area=',2*np.pi*star.pars[2]*star.pars[3]*star.pars[4])
 
     # compute PSF fit residual
     xv,yv = mesh_box([15,15], 5) # pull out subregion that was fit 
@@ -141,95 +165,126 @@ if __name__ == "__main__":
     ax[2].imshow(residual); ax[2].set_title('Residual')
     plt.show()
 
-
-
-
-    dude()
-
     # simulate some wierd pixel sensitivity 
-    xv,yv = mesh_box([15,15], 15 )
-    pr = ( (xv-15) + 5*(yv-15) )**2 + ( 5*(xv-15) + (yv-15) +3 )**2 * 0.5*np.cos(xv) * np.sin(yv)
-    pr = pr/pr.max()
-    pr *= -1
-    pr += 1
+    # xv,yv = mesh_box([15,15], 15 )
+    # pr = ( (xv-15) + 5*(yv-15) )**2 + ( 5*(xv-15) + (yv-15) +3 )**2 * 0.5*np.cos(xv) * np.sin(yv)
+    # pr = pr/pr.max()
+    # pr *= -1
+    # pr += 1
+    # plt.imshow(pr)
+    # plt.show()
 
-    plt.imshow(pr)
-    plt.show()
-
-    # simulate centroid positions 
-    NPTS = 10000
-    xcent = [15]
-    ycent = [15]
-    sigma = [0.55]
-    for i in range(1,NPTS):
-        xcent.append( xcent[i-1] + np.random.normal(0,0.005) )
-        ycent.append( ycent[i-1] + np.random.normal(0,0.005) )
-        sigma.append( sigma[i-1] + np.random.normal(0,0.001) )
-        #sigma.append( 0.75)
-
-
+    NPTS = 1000
 
     # simulate transit data 
     from ELCA import lc_fitter, transit
+    from flux_decorrelation import gaussian_weights 
 
     t = np.linspace(0.85,1.05,NPTS)
-
-    init = { 'rp':0.06, 'ar':14.07,       # Rp/Rs, a/Rs
+    init = { 'rp':0.1, 'ar':14.07,       # Rp/Rs, a/Rs
              'per':3.336817, 'inc':88.75, # Period (days), Inclination
              'u1': 0.3, 'u2': 0,          # limb darkening (linear, quadratic)
              'ecc':0, 'ome':0,            # Eccentricity, Arg of periastron
              'a0':1, 'a1':0,              # Airmass extinction terms
              'a2':0, 'tm':0.95 }          # tm = Mid Transit time (Days)
+    data = transit(time=t, values=init) #+ np.random.normal(0, 2e-4, len(t))
 
-    data = transit(time=t, values=init) + np.random.normal(0, 2e-4, len(t))
+    # simulate PSFs on detector
+    xcent = [15.13]
+    ycent = [14.96]
+    sigmax = [0.55]
+    sigmay = [0.55]
 
-
+    for i in range(1,NPTS):
+        xcent.append( xcent[i-1] + np.random.normal(0,0.005) )
+        ycent.append( ycent[i-1] + np.random.normal(0,0.005) )
+        sigmax.append( sigmax[i-1] + np.random.normal(0,0.0005) )
+        sigmay.append( sigmay[i-1] + np.random.normal(0,0.0005) )
 
     # simulate images on detector 
+    X = np.zeros((NPTS,7))
+    fluxs = np.zeros((NPTS,4))
+
     images = []
     photflux = []
     sqrflux = []
     trueflux = [] 
     psfflux = []
+    wxc = []
+    wyc = []
 
     for i in range(NPTS):
 
         img = ccd([32,32])
-        fluxscale = sigma[0]**2 / sigma[i]**2 
+        fluxscale = (sigmax[0]*sigmay[0]) / (sigmax[i]*sigmay[i])
 
-        star = psf( xcent[i], ycent[i], 1000*fluxscale*data[i], sigma[i],sigma[i], 0,0)
+        star = psf( 
+            [ 
+                xcent[i], ycent[i],
+                1000*fluxscale*data[i],
+                sigmax[i], sigmay[i],
+                np.pi/6, 0 # TODO fix rotation changing area of Gaussian
+            ], 
+            gaussian_psf
+        )
         img.draw(star)
         img.data += np.random.random( img.data.shape)
         images.append( img.data)
 
-        # the truth flux value
-        trueflux.append( star.gaussian_area )
+        # compute flux weighted centroid on subarray
+        xv,yv = mesh_box([np.argmax(img.data.sum(0)),np.argmax(img.data.sum(1))],5)
+        wx = np.sum(np.unique(xv)*img.data[yv,xv].sum(0))/np.sum(img.data[yv,xv].sum(0))
+        wy = np.sum(np.unique(yv)*img.data[yv,xv].sum(1))/np.sum(img.data[yv,xv].sum(1))
+        wxc.append( wx); wyc.append( wy)
 
-        # aperture photometry
-        apflux = phot(xcent[i],ycent[i],img.data,r=5,debug=False,bgsub=True)
-        photflux.append( apflux )
-        
-        # PSF photometry 
-        psff = fit_centroid(img.data,[xcent[i],ycent[i]], box=10, psf_output=True)
-        psfflux.append( psff.gaussian_area )
+        # estimate standard deviation 
+        x,y= img.data[yv,xv].sum(0),img.data[yv,xv].sum(1) 
+        sx = estimate_sigma(x)
+        sy = estimate_sigma(y)
 
+        # fit PSF 
+        pars = fit_psf(
+            img.data,
+            [wx, wy], 
+            [np.max(img.data[yv,xv]), sx, sy, 0, np.min(img.data[yv,xv]) ], # initial guess: [amp, sigx, sigy, rotation, bg]
+            [wx-5, wy-5, 0,   0, 0, -np.pi/4, 0],                           # lower bound: [xc, yc, amp, sigx, sigy, rotation,  bg]
+            [wx+5, wy+5, 1e5, 2, 2,  np.pi/4, np.percentile(img.data,25)],  # upper bound: 
+            psf_function=gaussian_psf,
+            box=5 # only fit a subregion +/- 5 px from centroid
+        )
+
+        X[i] = pars
+        psfflux.append( 2*np.pi*pars[2]*pars[3]*pars[4] )
+        trueflux.append( fluxscale*2*np.pi*1000*sigmax[i]*sigmay[i]*data[i] )
+        aperphot = phot(img.data, wx, wy, r=2.5,dr=8)
+        photflux.append( aperphot)        
 
     # test decorrelation methods 
-    from find_nbr import find_nbr_qhull
-    gw, nearest = find_nbr_qhull(xcent, ycent, 0)
+    gw, nearest = gaussian_weights( X[:,:2] )
+
+
     flux = np.array(photflux)/np.mean(photflux)
     wf = np.array([np.sum(flux[nearest[i]] * gw[i]) for i in range(len(flux))])
 
 
     f,ax = plt.subplots(3)
-    ax[0].plot(t,xcent,'r-',label='X')
-    ax[0].plot(t,ycent,'g-',label='Y')
+    ax[0].plot(t,xcent,label='X true',alpha=0.5)
+    ax[0].plot(t,ycent,label='Y true',alpha=0.5)
+    ax[0].plot(t,X[:,0],marker='.',ls='none',label='X est',alpha=0.5)
+    ax[0].plot(t,X[:,1],marker='.',ls='none',label='Y est',alpha=0.5)
+    ax[0].plot(t,wxc,marker='.',ls='none',label='X fw',alpha=0.5)
+    ax[0].plot(t,wyc,marker='.',ls='none',label='Y fw',alpha=0.5)
+
     ax[0].set_ylabel('Centroid Position [px]')
     ax[0].legend(loc='best')
-    ax[1].plot(t,sigma,'m-')
+    ax[1].plot(t,sigmax,label='X true',alpha=0.5)
+    ax[1].plot(t,sigmay,label='Y true',alpha=0.5)
+    ax[1].plot(t,X[:,3],marker='.',ls='none',label='X est',alpha=0.5)
+    ax[1].plot(t,X[:,4],marker='.',ls='none',label='Y est',alpha=0.5)
+    ax[1].legend(loc='best')
     ax[1].set_ylabel('PSF sigma [px]')
     ax[2].plot(t,np.array(photflux)/np.mean(photflux),'g.',label='Aperture Phot',alpha=0.5)
-    ax[2].plot(t,np.array(photflux)/np.mean(photflux)/wf,'r.',label='Aperture Phot + GW Decorrelation',alpha=0.5)
+    #ax[2].plot(t,np.array(photflux)/np.mean(photflux)/wf,'r.',label='Aperture Phot + GW Decorrelation',alpha=0.5)
     ax[2].plot(t,np.array(psfflux )/np.mean(psfflux),'c.',label='PSF Phot',alpha=0.5)
     ax[2].plot(t,np.array(trueflux)/np.mean(trueflux),'k.',label='Truth',alpha=0.5)
     ax[2].set_xlabel('Time')
