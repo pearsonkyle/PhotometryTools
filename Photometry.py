@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.misc import imresize
 from scipy.optimize import least_squares
+
 from photutils import aperture_photometry, CircularAperture, CircularAnnulus
 
 def mixed_psf(x,y,x0,y0,a,sigx,sigy,rot,b, w):
@@ -74,6 +76,7 @@ def phot(data,xc,yc,r=25,dr=5):
     try:
         apertures = CircularAperture(positions, r=r)
         phot_table = aperture_photometry(data, apertures, method='exact')
+        # apertures.to_mask()[0].data
         return float(phot_table['aperture_sum']) 
     except:
         # create high res mask (TODO make more efficient, precompute mask + pass in)
@@ -165,6 +168,7 @@ if __name__ == "__main__":
     ax[2].imshow(residual); ax[2].set_title('Residual')
     plt.show()
 
+    dude() 
     # simulate some wierd pixel sensitivity 
     # xv,yv = mesh_box([15,15], 15 )
     # pr = ( (xv-15) + 5*(yv-15) )**2 + ( 5*(xv-15) + (yv-15) +3 )**2 * 0.5*np.cos(xv) * np.sin(yv)
