@@ -1,7 +1,7 @@
 from scipy.spatial import cKDTree
 import numpy as np
 
-weightedflux = lambda flux, gw, nearest: np.array([np.sum(flux[nearest[i]] * gw[i]) for i in range(len(flux))])
+weightedflux = lambda flux, gw, nearest: np.sum(flux[nearest]*gw,axis=-1)
 
 def gaussian_weights( X, w=None, neighbors=100, feature_scale=1000):
     '''
