@@ -17,7 +17,7 @@ def gaussian_weights( X, w=None, neighbors=100, feature_scale=1000):
         dX  = Xm[ind] - Xm[point]
         Xstd= np.std(dX,0)       
         gX = np.exp(-dX**2/(2*Xstd**2))
-        gwX  = np.product(gX,1)
+        gwX  = np.product(gX,w)
         gw[point,:] = gwX/gwX.sum()
         nearest[point,:] = ind
     return gw, nearest.astype(int)
