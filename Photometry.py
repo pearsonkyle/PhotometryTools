@@ -1,6 +1,5 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.misc import imresize
 from scipy.optimize import least_squares
 
 from photutils import aperture_photometry, CircularAperture, CircularAnnulus
@@ -63,7 +62,7 @@ def fit_psf(data,pos,init,lo,up,psf_function=gaussian_psf,lossfn='linear',box=15
     res = least_squares(fcn2min,x0=[*pos,*init],bounds=[lo,up],loss=lossfn,jac='3-point')
     return res.x
 
-def phot(data,xc,yc,r=25,dr=5):
+def phot(data,xc,yc,r=5,dr=5):
 
     if dr>0:
         bgflux = skybg_phot(data,xc,yc,r,dr)
@@ -73,22 +72,32 @@ def phot(data,xc,yc,r=25,dr=5):
     data = data-bgflux
     data[data<0] = 0 
 
-    try:
-        apertures = CircularAperture(positions, r=r)
-        phot_table = aperture_photometry(data, apertures, method='exact')
-        # apertures.to_mask()[0].data
-        return float(phot_table['aperture_sum']) 
-    except:
-        # create high res mask (TODO make more efficient, precompute mask + pass in)
-        xvh,yvh = mesh_box([xc,yc], (np.round(r)+1)*10 )
-        rvh = ((xvh-xc)**2 + (yvh-yc)**2)**0.5
-        maskh = (rvh<r*10)
+    apertures = CircularAperture(positions, r=r)
+    phot_table = aperture_photometry(data, apertures, method='exact')
+    subdata = data[
+        apertures.to_mask()[0].bbox.iymin:apertures.to_mask()[0].bbox.iymax,
+        apertures.to_mask()[0].bbox.ixmin:apertures.to_mask()[0].bbox.ixmax
+    ] * apertures.to_mask()[0].data
 
-        # downsize to native resolution 
-        xv,yv = mesh_box([xc,yc], (np.round(r)+1) )
-        mask = imresize(maskh, xv.shape) # rough approx for fractional pixels
-        mask = mask / mask.max()
-        return np.sum(data[yv,xv] * mask)
+    npp = subdata.sum()**2 / np.sum(subdata**2)
+    return float(phot_table['aperture_sum']), bgflux, npp
+
+
+def aper_phot(img):
+
+    # flux weighted centroid
+    yc, xc = np.unravel_index(np.argmax(img,axis=None),  img.shape)
+    xv,yv = mesh_box([xc,yc],5)
+    wx = np.sum(np.unique(xv)* img[yv,xv].sum(0))/np.sum( img[yv,xv].sum(0))
+    wy = np.sum(np.unique(yv)* img[yv,xv].sum(1))/np.sum( img[yv,xv].sum(1))
+
+    # loop through aper sizes
+    apers = []; bgs = []; npps = []
+    for r in np.arange(2,5,0.1):
+        area, bg, npp = phot( img, wx, wy, r=r, dr=7)
+        apers.append(area); bgs.append(bg); npps.append(npp)
+
+    return wx, wy, apers, bgs, npps
 
 def skybg_phot(data,xc,yc,r=25,dr=5):    
     # create a crude annulus to mask out bright background pixels 
